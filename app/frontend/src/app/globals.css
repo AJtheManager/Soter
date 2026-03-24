@@ -1,7 +1,6 @@
 @import "tailwindcss";
 
-/* Uncomment when using Leaflet maps */
-/* @import "leaflet/dist/leaflet.css"; */
+@import "leaflet/dist/leaflet.css";
 
 :root {
   --background: #ffffff;
@@ -26,4 +25,69 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.aid-map {
+  height: 100%;
+  width: 100%;
+  font-family: inherit;
+}
+
+.aid-map .leaflet-control-attribution {
+  font-size: 10px;
+}
+
+.aid-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #2563eb;
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.25);
+}
+
+.aid-marker span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.aid-marker--default span {
+  background: #38bdf8;
+}
+
+.aid-marker--delivered span {
+  background: #22c55e;
+}
+
+.aid-marker--pending span {
+  background: #f59e0b;
+}
+
+.aid-marker--in-transit span {
+  background: #0ea5e9;
+}
+
+.aid-marker--failed span {
+  background: #ef4444;
+}
+
+.aid-marker--cluster {
+  background: rgba(37, 99, 235, 0.9);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+.aid-marker--cluster span {
+  width: auto;
+  height: auto;
+  background: transparent;
+}
+
+.aid-popup .leaflet-popup-content-wrapper {
+  border-radius: 12px;
 }
