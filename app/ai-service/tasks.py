@@ -14,6 +14,7 @@ import httpx
 import metrics
 from config import settings
 from services.pii_scrubber import PIIScrubberService
+from services.humanitarian_verification import HumanitarianVerificationService
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ def get_process_heavy_inference_task():
 # Task status storage (in production, use Redis with proper TTL)
 task_results: Dict[str, Dict[str, Any]] = {}
 pii_scrubber_service = PIIScrubberService()
+humanitarian_verification_service = HumanitarianVerificationService()
 
 
 def update_task_status(
@@ -176,6 +178,8 @@ def process_heavy_inference_impl(self, task_id: str, payload: Dict[str, Any]) ->
             result = _process_image_analysis(payload)
         elif task_type == 'model_inference':
             result = _process_model_inference(payload)
+        elif task_type == 'humanitarian_verification':
+            result = _process_humanitarian_verification(payload)
         elif task_type == 'batch_processing':
             result = _process_batch(payload)
         else:
@@ -323,6 +327,27 @@ def _process_default_inference(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _process_humanitarian_verification(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process humanitarian claim verification using standardized prompts."""
+    data = payload.get('data', {})
+    aid_claim = data.get('aid_claim')
+    if not aid_claim:
+        raise ValueError("'aid_claim' is required for humanitarian_verification tasks")
+
+    verification = humanitarian_verification_service.verify_claim(
+        aid_claim=aid_claim,
+        supporting_evidence=data.get('supporting_evidence', []),
+        context_factors=data.get('context_factors', {}),
+        provider_preference=data.get('provider_preference', 'auto'),
+    )
+
+    return {
+        'type': 'humanitarian_verification',
+        'status': 'success',
+        'result': verification,
+    }
+
+
 def get_task_status(task_id: str) -> Dict[str, Any]:
     """
     Get the status of a background task
@@ -335,7 +360,7 @@ def get_task_status(task_id: str) -> Dict[str, Any]:
     """
     # Try to get from Celery result backend first
     try:
-        celery_result = AsyncResult(task_id, app=celery_app)
+        celery_result = AsyncResult(task_id, app=get_celery_app())
         if celery_result.ready():
             return {
                 'task_id': task_id,

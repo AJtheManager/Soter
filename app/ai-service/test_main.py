@@ -167,3 +167,62 @@ def test_anonymize_endpoint_validation(client):
     """Test request validation for anonymization endpoint."""
     response = client.post("/ai/anonymize", json={"text": ""})
     assert response.status_code == 422
+
+
+def test_humanitarian_verification_success(client, monkeypatch):
+    """Test successful humanitarian verification response contract."""
+
+    def fake_verify_claim(aid_claim, supporting_evidence=None, context_factors=None, provider_preference="auto"):
+        return {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "prompt_variant": "primary",
+            "verification": {
+                "verdict": "credible",
+                "confidence": 0.86,
+                "summary": "Evidence aligns with key distribution records.",
+            },
+            "raw_response": "{}",
+        }
+
+    monkeypatch.setattr(main.humanitarian_verification_service, "verify_claim", fake_verify_claim)
+
+    response = client.post(
+        "/ai/humanitarian/verify",
+        json={
+            "aid_claim": "Relief teams delivered hygiene kits to all registered households in Sector B.",
+            "supporting_evidence": ["Distribution list #B-17"],
+            "context_factors": {"security_status": "stable"},
+            "provider_preference": "auto",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["provider"] == "openai"
+    assert data["verification"]["verdict"] == "credible"
+
+
+def test_humanitarian_verification_failure(client, monkeypatch):
+    """Test humanitarian verification failure path."""
+
+    def fake_verify_claim(aid_claim, supporting_evidence=None, context_factors=None, provider_preference="auto"):
+        raise RuntimeError("all providers unavailable")
+
+    monkeypatch.setattr(main.humanitarian_verification_service, "verify_claim", fake_verify_claim)
+
+    response = client.post(
+        "/ai/humanitarian/verify",
+        json={
+            "aid_claim": "Temporary clinics are fully operational in all camps.",
+            "supporting_evidence": [],
+            "context_factors": {},
+            "provider_preference": "auto",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert "all providers unavailable" in data["error"]

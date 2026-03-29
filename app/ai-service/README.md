@@ -63,6 +63,40 @@ Response body:
 ### OCR Processing
 - **POST** `/ai/ocr` - Identity document OCR with field extraction
 
+### Humanitarian Verification
+- **POST** `/ai/humanitarian/verify` - Standardized humanitarian claim verification (Sphere criteria + context factors + provider fallback)
+
+Request body:
+
+```json
+{
+  "aid_claim": "Relief teams delivered hygiene kits to all registered households in Sector B.",
+  "supporting_evidence": ["Distribution list #B-17", "Field monitor report"],
+  "context_factors": {
+    "security_status": "stable",
+    "weather": "heavy_rain",
+    "displacement_level": "moderate"
+  },
+  "provider_preference": "auto"
+}
+```
+
+Response body:
+
+```json
+{
+  "success": true,
+  "provider": "openai",
+  "model": "gpt-4o-mini",
+  "prompt_variant": "primary",
+  "verification": {
+    "verdict": "credible",
+    "confidence": 0.86,
+    "summary": "Evidence aligns with claim across key criteria"
+  }
+}
+```
+
 ```bash
 curl -X POST "http://localhost:8000/ai/ocr" -F "image=@document.jpg"
 ```

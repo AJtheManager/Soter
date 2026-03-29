@@ -23,6 +23,11 @@ import tasks
 from proof_of_life import ProofOfLifeAnalyzer, ProofOfLifeConfig
 from schemas.anonymization import AnonymizeRequest, AnonymizeResponse
 from services.pii_scrubber import PIIScrubberService
+from schemas.humanitarian import (
+    HumanitarianVerificationRequest,
+    HumanitarianVerificationResponse,
+)
+from services.humanitarian_verification import HumanitarianVerificationService
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -63,6 +68,7 @@ proof_of_life_analyzer = ProofOfLifeAnalyzer(
     )
 )
 pii_scrubber_service = PIIScrubberService()
+humanitarian_verification_service = HumanitarianVerificationService()
 
 
 # Request/Response models
@@ -245,6 +251,24 @@ async def anonymize_text(request: AnonymizeRequest):
         raise HTTPException(status_code=500, detail="Failed to anonymize text")
 
 
+@app.post("/ai/humanitarian/verify", response_model=HumanitarianVerificationResponse)
+async def verify_humanitarian_claim(request: HumanitarianVerificationRequest):
+    """Verify an aid claim against standardized humanitarian criteria."""
+    logger.info("Processing humanitarian verification request")
+
+    try:
+        result = humanitarian_verification_service.verify_claim(
+            aid_claim=request.aid_claim,
+            supporting_evidence=request.supporting_evidence,
+            context_factors=request.context_factors,
+            provider_preference=request.provider_preference,
+        )
+        return HumanitarianVerificationResponse(success=True, **result)
+    except Exception as e:
+        logger.error("Humanitarian verification failed: %s", str(e), exc_info=True)
+        return HumanitarianVerificationResponse(success=False, error=str(e))
+
+
 @app.get("/ai/status/{task_id}", response_model=TaskStatusResponse)
 async def get_task_status(task_id: str):
     """
@@ -297,7 +321,7 @@ async def cancel_task(task_id: str):
     try:
         from celery.result import AsyncResult
 
-        result = AsyncResult(task_id, app=tasks.celery_app)
+        result = AsyncResult(task_id, app=tasks.get_celery_app())
         result.revoke(terminate=True)
 
         tasks.update_task_status(task_id, "cancelled")
