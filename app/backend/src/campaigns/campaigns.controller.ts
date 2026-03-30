@@ -8,6 +8,8 @@ import {
   Patch,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBody,
@@ -21,12 +23,14 @@ import {
   ApiTags,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Request } from 'express';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { ApiResponseDto } from '../common/dto/api-response.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { AppRole } from 'src/auth/app-role.enum';
+import { OrgOwnershipGuard } from '../common/guards/org-ownership.guard';
 
 @ApiTags('Campaigns')
 @ApiBearerAuth('JWT-auth')
@@ -36,6 +40,7 @@ export class CampaignsController {
 
   @Post()
   @Roles(AppRole.admin, AppRole.ngo)
+  @UseGuards(OrgOwnershipGuard)
   @ApiOperation({ summary: 'Create a campaign' })
   @ApiBody({ type: CreateCampaignDto })
   @ApiCreatedResponse({ description: 'Campaign created successfully.' })
@@ -48,15 +53,16 @@ export class CampaignsController {
   @ApiForbiddenResponse({
     description: 'Access denied - insufficient permissions for this operation.',
   })
-  async create(@Body() dto: CreateCampaignDto) {
-    const campaign = await this.campaigns.create(dto);
+  async create(@Body() dto: CreateCampaignDto, @Req() req: Request) {
+    const campaign = await this.campaigns.create(dto, req.user?.ngoId);
     return ApiResponseDto.ok(campaign, 'Campaigns created successfully');
   }
 
   @Get()
   @ApiOperation({
     summary: 'List all campaigns',
-    description: 'Retrieves a list of all active or archived campaigns.',
+    description:
+      "Retrieves campaigns. NGO operators only see their own organization's campaigns.",
   })
   @ApiOkResponse({ description: 'List of campaigns retrieved successfully.' })
   @ApiUnauthorizedResponse({
@@ -65,8 +71,11 @@ export class CampaignsController {
   async list(
     @Query('includeArchived', new DefaultValuePipe(false), ParseBoolPipe)
     includeArchived: boolean,
+    @Req() req: Request,
   ) {
-    const campaigns = await this.campaigns.findAll(includeArchived);
+    // Scope to ngoId for NGO role; admins/operators see all
+    const ngoId = req.user?.role === AppRole.ngo ? req.user.ngoId : undefined;
+    const campaigns = await this.campaigns.findAll(includeArchived, ngoId);
     return ApiResponseDto.ok(campaigns, 'Campaigns fetched successfully');
   }
 
@@ -86,6 +95,7 @@ export class CampaignsController {
   }
 
   @Patch(':id')
+  @UseGuards(OrgOwnershipGuard)
   @ApiOperation({
     summary: 'Update a campaign',
     description:
@@ -108,6 +118,7 @@ export class CampaignsController {
   }
 
   @Patch(':id/archive')
+  @UseGuards(OrgOwnershipGuard)
   @ApiOperation({
     summary: 'Archive campaign (soft archive)',
     description:
