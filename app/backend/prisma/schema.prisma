@@ -142,12 +142,26 @@ enum AppRole {
 
 model ApiKey {
   id          String   @id @default(cuid())
-  key         String   @unique
+  // `key` is a legacy plaintext column. New keys should use `keyHash` and
+  // `keyPreview` and never store raw secrets.
+  key         String?  @unique
+  keyHash     String?  @unique
+  keyPreview  String?
   role        AppRole
   ngoId       String?
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  lastUsedAt  DateTime?
+  createdBy   String?
+  revokedAt   DateTime?
+  revokedBy   String?
+  revokedReason String?
+  replacedById String?
+  replacedBy   ApiKey?  @relation("ApiKeyReplacement", fields: [replacedById], references: [id])
+  replacedFrom ApiKey[] @relation("ApiKeyReplacement")
 
   @@index([ngoId])
+  @@index([revokedAt])
+  @@index([lastUsedAt])
 }
