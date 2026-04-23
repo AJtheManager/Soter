@@ -1,13 +1,19 @@
 import pytest
 
 from services.humanitarian_verification import HumanitarianVerificationService
+import metrics
+from unittest.mock import patch, MagicMock
 
 
 class TestHumanitarianVerificationService:
     def setup_method(self):
         self.service = HumanitarianVerificationService()
 
-    def test_verify_claim_uses_fallback_prompt_after_primary_failure(self, monkeypatch):
+    @patch('metrics.PIPELINE_STEP_LATENCY.labels')
+    def test_verify_claim_uses_fallback_prompt_after_primary_failure(self, mock_labels, monkeypatch):
+        mock_observe = MagicMock()
+        mock_labels.return_value.observe = mock_observe
+        
         calls = []
 
         def fake_attempt_order(provider_preference):
@@ -37,6 +43,9 @@ class TestHumanitarianVerificationService:
         assert result["provider"] == "openai"
         assert result["verification"]["verdict"] == "inconclusive"
         assert len(calls) == 2
+        
+        mock_labels.assert_called_with(step_name='verify')
+        mock_observe.assert_called_once()
 
     def test_verify_claim_fails_when_no_provider_configured(self, monkeypatch):
         monkeypatch.setattr(self.service, "_provider_attempt_order", lambda provider_preference: [])
