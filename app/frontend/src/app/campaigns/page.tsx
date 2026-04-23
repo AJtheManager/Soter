@@ -18,6 +18,21 @@ const statusStyles: Record<CampaignStatus, string> = {
   archived: 'bg-red-100 text-red-800',
 };
 
+/** Map AidPackageFilters status values to CampaignStatus (best-effort). */
+function toCampaignStatus(value: string): CampaignStatus | '' {
+  const map: Record<string, CampaignStatus> = {
+    Active: 'active',
+    active: 'active',
+    Expired: 'archived',
+    archived: 'archived',
+    Claimed: 'completed',
+    completed: 'completed',
+    paused: 'paused',
+    draft: 'draft',
+  };
+  return map[value] ?? '';
+}
+
 export default function CampaignsPage() {
   const userRole = getUserRole();
   const userRoleLabel = getUserRoleLabel(userRole);
@@ -31,9 +46,35 @@ export default function CampaignsPage() {
   const [expiry, setExpiry] = useState('');
   const [formMessage, setFormMessage] = useState<string | null>(null);
 
+  // ── Filter helpers ─────────────────────────────────────────────────────────
+
+  function updateParam(key: string, value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set(key, value);
+    else params.delete(key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }
+
+  const handleApplyPreset = useCallback(
+    (preset: AidPackageFilters) => {
+      const params = new URLSearchParams();
+      if (preset.status) params.set('status', preset.status);
+      router.replace(params.size ? `?${params.toString()}` : '?', { scroll: false });
+    },
+    [router],
+  );
+
+  // Convert URL status param → CampaignStatus for filtering
+  const activeCampaignStatus = toCampaignStatus(urlStatus);
+
   const activeCampaigns = useMemo(
-    () => campaigns.filter(campaign => campaign.status !== 'archived'),
-    [campaigns]
+    () =>
+      campaigns.filter(campaign => {
+        if (campaign.status === 'archived') return false;
+        if (activeCampaignStatus) return campaign.status === activeCampaignStatus;
+        return true;
+      }),
+    [campaigns, activeCampaignStatus],
   );
 
   if (!canManageCampaigns(userRole)) {
@@ -184,7 +225,7 @@ export default function CampaignsPage() {
               </p>
             )}
             {!isLoading && !isError && activeCampaigns.length === 0 && (
-              <p className="text-gray-500">No active campaigns available.</p>
+              <p className="text-gray-500">No campaigns match the current filter.</p>
             )}
 
             <div className="space-y-3">
