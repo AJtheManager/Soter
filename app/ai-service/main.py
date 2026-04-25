@@ -10,7 +10,11 @@ from typing import Any, Dict, List, Optional
 import logging
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from exceptions import AIServiceError
+from schemas.errors import ErrorDetail, ErrorEnvelope
 import time
 import metrics
 
@@ -437,12 +441,40 @@ async def http_exception_handler(request, exc: HTTPException):
     logger.error(f"HTTP Exception: {exc.status_code} - {exc.detail}")
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "error": True,
-            "status_code": exc.status_code,
-            "detail": exc.detail,
-            "service": "soter-ai-service",
-        },
+        content=ErrorEnvelope(
+            error=ErrorDetail(code=f"HTTP_{exc.status_code}", message=str(exc.detail))
+        ).model_dump(),
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request, exc: StarletteHTTPException):
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    logger.error(f"Validation error: {exc.errors()}")
+    return JSONResponse(
+        status_code=422,
+        content=ErrorEnvelope(
+            error=ErrorDetail(
+                code="VALIDATION_ERROR",
+                message="Request validation failed",
+                details=exc.errors(),
+            )
+        ).model_dump(),
+    )
+
+
+@app.exception_handler(AIServiceError)
+async def ai_service_exception_handler(request, exc: AIServiceError):
+    logger.error(f"AI service error: {exc.message}", exc_info=True)
+    return JSONResponse(
+        status_code=502,
+        content=ErrorEnvelope(
+            error=ErrorDetail(code=exc.code, message=exc.message, details=exc.details)
+        ).model_dump(),
     )
 
 
@@ -451,12 +483,9 @@ async def general_exception_handler(request, exc: Exception):
     logger.error(f"Unhandled Exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={
-            "error": True,
-            "status_code": 500,
-            "detail": "Internal server error",
-            "service": "soter-ai-service",
-        },
+        content=ErrorEnvelope(
+            error=ErrorDetail(code="INTERNAL_SERVER_ERROR", message="Internal server error")
+        ).model_dump(),
     )
 
 
