@@ -105,10 +105,13 @@ model VerificationSession {
   createdAt   DateTime                 @default(now())
   updatedAt   DateTime                 @updatedAt
   deletedAt   DateTime?
+  orgId       String?
+  organization Organization? @relation(fields: [orgId], references: [id])
 
   @@index([identifier, createdAt])
   @@index([status, expiresAt])
   @@index([deletedAt])
+  @@index([orgId])
 }
 
 model Session {
@@ -123,6 +126,8 @@ model Session {
   completedAt DateTime?
   failedAt    DateTime?
   deletedAt   DateTime?
+  orgId       String?
+  organization Organization? @relation(fields: [orgId], references: [id])
 
   steps       SessionStep[]
   submissions SessionSubmission[]
@@ -132,6 +137,7 @@ model Session {
   @@index([expiresAt])
   @@index([createdAt])
   @@index([deletedAt])
+  @@index([orgId])
 }
 
 model SessionStep {
@@ -183,8 +189,11 @@ model VerificationRequest {
   deletedAt DateTime?
 
   status    String    @default("pending")
+  orgId       String?
+  organization Organization? @relation(fields: [orgId], references: [id])
 
   @@index([deletedAt])
+  @@index([orgId])
 }
 
 model Claim {
@@ -257,6 +266,60 @@ model AuditLog {
   @@index([deletedAt])
 }
 
+model Organization {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  invites   Invite[]
+  campaigns Campaign[]
+  apiKeys   ApiKey[]
+  users     User[]
+  sessions  Session[]
+  verificationSessions VerificationSession[]
+  verificationRequests VerificationRequest[]
+
+  @@index([deletedAt])
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  role      AppRole   @default(client)
+  orgId     String?
+  organization Organization? @relation(fields: [orgId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([orgId])
+}
+
+enum InviteStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+model Invite {
+  id           String       @id @default(cuid())
+  orgId        String
+  organization Organization @relation(fields: [orgId], references: [id])
+  email        String
+  role         AppRole
+  status       InviteStatus @default(pending)
+  expiresAt    DateTime
+  createdBy    String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([orgId])
+  @@index([email])
+  @@index([status])
+}
+
 model Campaign {
   id          String          @id @default(cuid())
 
@@ -269,6 +332,8 @@ model Campaign {
   metadata    Json?
 
   ngoId       String?
+  orgId       String?
+  organization Organization? @relation(fields: [orgId], references: [id])
 
   archivedAt  DateTime?
   deletedAt   DateTime?
@@ -283,6 +348,7 @@ model Campaign {
   @@index([status])
   @@index([archivedAt])
   @@index([ngoId])
+  @@index([orgId])
   @@index([deletedAt])
 }
 
@@ -307,6 +373,8 @@ model ApiKey {
   keyPreview  String?
   role        AppRole
   ngoId       String?
+  orgId       String?
+  organization Organization? @relation(fields: [orgId], references: [id])
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -320,6 +388,7 @@ model ApiKey {
   replacedFrom ApiKey[] @relation("ApiKeyReplacement")
 
   @@index([ngoId])
+  @@index([orgId])
   @@index([revokedAt])
   @@index([lastUsedAt])
 }

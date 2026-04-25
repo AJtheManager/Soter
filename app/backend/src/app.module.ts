@@ -38,6 +38,10 @@ import { SessionModule } from './session/session.module';
 import { CommonServicesModule } from './common/services/common-services.module';
 import { EvidenceModule } from './evidence/evidence.module';
 import { RetentionPolicyModule } from './retention-policy/retention-policy.module';
+import { InvitesModule } from './orgs/invites.module';
+import { AdminSearchModule } from './search/admin-search.module';
+import { RedisModule } from '@liaoliaots/nestjs-redis';
+import { AdaptiveRateLimitGuard } from './common/guards/adaptive-rate-limit.guard';
 
 @Module({
   imports: [
@@ -86,6 +90,18 @@ import { RetentionPolicyModule } from './retention-policy/retention-policy.modul
     CommonServicesModule,
     EvidenceModule,
     RetentionPolicyModule,
+    InvitesModule,
+    AdminSearchModule,
+    RedisModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        config: {
+          host: configService.get<string>('REDIS_HOST') ?? 'localhost',
+          port: parseInt(configService.get<string>('REDIS_PORT') ?? '6379', 10),
+        },
+      }),
+      inject: [ConfigService],
+    }),
     ThrottlerModule.forRoot([
       {
         ttl: 60000, // 60 seconds window
@@ -110,12 +126,12 @@ import { RetentionPolicyModule } from './retention-policy/retention-policy.modul
       useClass: RolesGuard, // runs second — checks request.user.role against @Roles()
     },
     {
-      provide: APP_INTERCEPTOR,
-      useClass: LoggingInterceptor,
+      provide: APP_GUARD,
+      useClass: AdaptiveRateLimitGuard, // Adaptive rate limiting using Redis
     },
     {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard, // rate-limiting guard runs after auth and role checks to avoid unnecessary counting of unauthenticated/unauthorized requests
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
     },
   ],
 })
@@ -128,9 +144,6 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     // Request correlation middleware
     consumer.apply(RequestCorrelationMiddleware).forRoutes('*');
-
-    // Rate limiter middleware
-    consumer.apply(createRateLimiter(this.configService)).forRoutes('*');
 
     // Startup log
     this.loggerService.log(
