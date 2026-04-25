@@ -452,6 +452,11 @@ impl AidEscrow {
 
         env.storage().persistent().set(&key, &package);
 
+        let counter: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        if id >= counter {
+            env.storage().instance().set(&KEY_PKG_COUNTER, &(id + 1));
+        }
+
         // 5. Track package index for aggregation
         let idx: u64 = env.storage().instance().get(&KEY_PKG_IDX).unwrap_or(0);
         let idx_key = (symbol_short!("pidx"), idx);
@@ -822,55 +827,63 @@ impl AidEscrow {
     /// Behavior: Adds additional_time to the package's expires_at timestamp.
     /// Cannot extend unbounded packages (expires_at == 0).
     pub fn extend_expiration(env: Env, package_id: u64, additional_time: u64) -> Result<(), Error> {
-        // 1. Only the admin can extend (check stored admin and require_auth)
+        if additional_time == 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let package = Self::get_package(env.clone(), package_id)?;
+        if package.expires_at == 0 {
+            return Err(Error::InvalidState);
+        }
+
+        Self::extend_expiry(env, package_id, package.expires_at + additional_time)
+    }
+
+    /// Admin-only package expiration extension using an absolute target timestamp.
+    /// Requirements: admin auth, existing package, package still active, and `new_expires_at`
+    /// must strictly increase the current expiry while respecting config safety limits.
+    pub fn extend_expiry(env: Env, id: u64, new_expires_at: u64) -> Result<(), Error> {
         let admin = Self::get_admin(env.clone())?;
         admin.require_auth();
         let config = Self::get_config(env.clone());
 
-        // 2. Package must exist
-        let key = (symbol_short!("pkg"), package_id);
+        let key = (symbol_short!("pkg"), id);
         let mut package: Package = env
             .storage()
             .persistent()
             .get(&key)
             .ok_or(Error::PackageNotFound)?;
 
-        // 3. Package status must be Created
         if package.status != PackageStatus::Created {
             return Err(Error::PackageNotActive);
         }
 
-        // 4. additional_time must be greater than 0
-        if additional_time == 0 {
-            return Err(Error::InvalidAmount);
-        }
-
-        // 5. Package must not be unbounded (expires_at must be > 0)
         if package.expires_at == 0 {
             return Err(Error::InvalidState);
         }
 
-        // 6. Package must not already be expired
-        if env.ledger().timestamp() > package.expires_at {
+        let now = env.ledger().timestamp();
+        if now > package.expires_at {
             return Err(Error::PackageExpired);
         }
 
-        // 7. Calculate new expiration and update
         let old_expires_at = package.expires_at;
-        let new_expires_at = old_expires_at + additional_time;
-        if config.max_expires_in > 0 {
-            let now = env.ledger().timestamp();
-            if new_expires_at <= now || new_expires_at - now > config.max_expires_in {
-                return Err(Error::InvalidState);
-            }
+        if new_expires_at <= old_expires_at {
+            return Err(Error::InvalidState);
         }
+
+        if config.max_expires_in > 0
+            && (new_expires_at <= now || new_expires_at - now > config.max_expires_in)
+        {
+            return Err(Error::InvalidState);
+        }
+
         package.expires_at = new_expires_at;
         env.storage().persistent().set(&key, &package);
 
-        // 8. Emit Extended event
         ExtendedEvent {
-            id: package_id,
-            admin: admin.clone(),
+            id,
+            admin,
             old_expires_at,
             new_expires_at,
         }
@@ -1042,6 +1055,26 @@ impl AidEscrow {
             total_claimed,
             total_expired_cancelled,
         }
+    }
+
+    /// Returns the number of stored packages assigned to `recipient`.
+    ///
+    /// This naive helper scans all package IDs from `0..package_counter`, treating the
+    /// counter as an upper bound over assigned IDs and skipping gaps.
+    pub fn get_recipient_package_count(env: Env, recipient: Address) -> u64 {
+        let count: u64 = env.storage().instance().get(&KEY_PKG_COUNTER).unwrap_or(0);
+        let mut matches = 0;
+
+        for id in 0..count {
+            let key = (symbol_short!("pkg"), id);
+            if let Some(package) = env.storage().persistent().get::<_, Package>(&key)
+                && package.recipient == recipient
+            {
+                matches += 1;
+            }
+        }
+
+        matches
     }
 }
 

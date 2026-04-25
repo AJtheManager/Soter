@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import Link from 'next/link';
+import { AppEmptyState } from '@/components/empty-state/AppEmptyState';
 import { EvidenceArtifactViewer } from './EvidenceArtifactViewer';
 import { RedactionControls } from './RedactionControls';
+import { getAppUserRole, getSampleVerificationText, isOperationsRole } from '@/lib/app-role';
 import { startEvidenceVerification, VerificationApiError } from '@/lib/verification-api';
 import type {
     PiiDetectionResult,
@@ -24,6 +27,33 @@ const ACCEPTED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const ACCEPTED_MIME_SET: ReadonlySet<string> = new Set(ACCEPTED_MIME_TYPES);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
 const MIN_TEXT_LENGTH = 20;
+const ENHANCED_DRAFT_STORAGE_KEY = 'soter.enhanced-verification-flow.draft.v1';
+
+interface EnhancedVerificationDraft {
+    textInput: string;
+}
+
+export function parseEnhancedVerificationDraft(
+    raw: string | null,
+): EnhancedVerificationDraft | null {
+    if (!raw) return null;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return null;
+        const candidate = parsed as Record<string, unknown>;
+        if (typeof candidate.textInput !== 'string') return null;
+        return { textInput: candidate.textInput };
+    } catch {
+        return null;
+    }
+}
+
+function readEnhancedVerificationDraftFromStorage(): EnhancedVerificationDraft | null {
+    if (typeof window === 'undefined') return null;
+    return parseEnhancedVerificationDraft(
+        window.localStorage.getItem(ENHANCED_DRAFT_STORAGE_KEY),
+    );
+}
 
 /* ─── Enhanced Flow State ─────────────────────────────────────────────── */
 
@@ -87,11 +117,16 @@ function createMockEvidenceArtifact(
 
 export const EnhancedVerificationFlow: React.FC = () => {
     const uid = useId();
+    const role = getAppUserRole();
+    const [restoredDraft] = useState<EnhancedVerificationDraft | null>(() =>
+        readEnhancedVerificationDraftFromStorage(),
+    );
+    const [draftRestored, setDraftRestored] = useState(restoredDraft !== null);
 
     const [flowState, setFlowState] = useState<EnhancedFlowState>({
         step: 'upload',
         imageFile: null,
-        textInput: '',
+        textInput: restoredDraft?.textInput ?? '',
         errors: {},
         apiError: null,
         result: null,
@@ -105,9 +140,11 @@ export const EnhancedVerificationFlow: React.FC = () => {
     });
 
     const pendingPayload = useRef<FormData | null>(null);
+    const { imageFile, textInput } = flowState;
 
     /* ── Reset Flow ───────────────────────────────────────────────────────── */
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const resetFlow = useCallback(() => {
         setFlowState({
             step: 'upload',
@@ -119,8 +156,25 @@ export const EnhancedVerificationFlow: React.FC = () => {
             evidenceArtifact: null,
             showArtifactViewer: false,
         });
+        setDraftRestored(false);
+        if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(ENHANCED_DRAFT_STORAGE_KEY);
+        }
         pendingPayload.current = null;
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined' || flowState.step !== 'upload') return;
+        const trimmedText = flowState.textInput.trim();
+        if (trimmedText.length === 0) {
+            window.localStorage.removeItem(ENHANCED_DRAFT_STORAGE_KEY);
+            return;
+        }
+        window.localStorage.setItem(
+            ENHANCED_DRAFT_STORAGE_KEY,
+            JSON.stringify({ textInput: flowState.textInput }),
+        );
+    }, [flowState.step, flowState.textInput]);
 
     /* ── PII Detection (enhanced) ───────────────────────────────────────────── */
 
@@ -172,10 +226,9 @@ export const EnhancedVerificationFlow: React.FC = () => {
 
     /* ── Form Submission ───────────────────────────────────────────────────── */
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleSubmit = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-
-        const { imageFile, textInput } = flowState;
         
         // 1. Client-side validation
         const validationErrors = validateUploadForm(imageFile, textInput);
@@ -219,7 +272,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
             showArtifactViewer: true,
             step: 'analysing',
         }));
-    }, [flowState.imageFile, flowState.textInput, validateUploadForm, detectPII]);
+    }, [imageFile, textInput, validateUploadForm, detectPII]);
 
     /* ── API Verification ─────────────────────────────────────────────────── */
 
@@ -258,6 +311,7 @@ export const EnhancedVerificationFlow: React.FC = () => {
 
     /* ── Redaction Handlers ───────────────────────────────────────────────── */
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleRedactionChange = useCallback((regions: RedactionRegion[]) => {
         if (!flowState.evidenceArtifact) return;
 
@@ -274,10 +328,12 @@ export const EnhancedVerificationFlow: React.FC = () => {
         setFlowState(prev => ({ ...prev, evidenceArtifact: updatedArtifact }));
     }, [flowState.evidenceArtifact]);
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleArtifactUpdate = useCallback((artifact: EvidenceArtifact) => {
         setFlowState(prev => ({ ...prev, evidenceArtifact: artifact }));
     }, []);
 
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     const handleRedactionLevelChange = useCallback((level: RedactionLevel) => {
         if (!flowState.evidenceArtifact) return;
 
@@ -334,6 +390,33 @@ export const EnhancedVerificationFlow: React.FC = () => {
             {flowState.step === 'upload' && (
                 <div>
                     <h2 className="text-lg font-semibold mb-4">Submit Evidence for Verification</h2>
+
+                    {!flowState.imageFile && flowState.textInput.trim().length === 0 && (
+                        <div className="mb-6">
+                            <AppEmptyState
+                                compact
+                                eyebrow="No Evidence Added"
+                                title={
+                                    isOperationsRole(role)
+                                        ? 'Seed the review flow with sample evidence'
+                                        : 'Start with sample evidence if you want to explore before submitting real details'
+                                }
+                                description={
+                                    isOperationsRole(role)
+                                        ? 'This enhanced flow is easiest to review with a short sample note and a small image so contributors can inspect upload, redaction, and result states.'
+                                        : 'You can provide your own text and image, or insert sample evidence to learn the flow safely.'
+                                }
+                                actions={[
+                                    {
+                                        onClick: () => setFlowState(prev => ({ ...prev, textInput: getSampleVerificationText(role) })),
+                                        label: 'Insert sample evidence',
+                                        icon: 'sample',
+                                    },
+                                    { href: '/help', label: 'View help', icon: 'docs', variant: 'secondary' },
+                                ]}
+                            />
+                        </div>
+                    )}
                     
                     {flowState.apiError && (
                         <div
@@ -342,6 +425,12 @@ export const EnhancedVerificationFlow: React.FC = () => {
                         >
                             {flowState.apiError}
                         </div>
+                    )}
+
+                    {draftRestored && (
+                        <p className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
+                            Restored your locally saved draft from this device.
+                        </p>
                     )}
 
                     {flowState.errors.form && (
@@ -426,14 +515,23 @@ export const EnhancedVerificationFlow: React.FC = () => {
                             )}
                         </div>
 
-                        <button
-                            type="submit"
-                            disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
-                            aria-disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
-                            className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                        >
-                            Submit for Verification
-                        </button>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <button
+                                type="submit"
+                                disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
+                                aria-disabled={!flowState.imageFile && flowState.textInput.trim().length === 0}
+                                className="px-6 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                            >
+                                Submit for Verification
+                            </button>
+                            <button
+                                type="button"
+                                onClick={resetFlow}
+                                className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800 transition-colors"
+                            >
+                                Discard Draft
+                            </button>
+                        </div>
                     </form>
                 </div>
             )}
@@ -547,6 +645,13 @@ export const EnhancedVerificationFlow: React.FC = () => {
                     >
                         Start New Verification
                     </button>
+
+                    <Link
+                        href="/help"
+                        className="inline-flex items-center rounded-lg text-sm font-medium text-blue-600 hover:text-blue-700"
+                    >
+                        Review contributor help
+                    </Link>
                 </div>
             )}
         </div>
