@@ -9,6 +9,7 @@ export type RootStackParamList = {
   ClaimReceipt: { claimId: string };
   Settings: undefined;
   Scanner: undefined;
+  BulkScanner: undefined;
   TaskList: undefined;
 };
 
